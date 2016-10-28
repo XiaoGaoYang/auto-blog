@@ -12,10 +12,19 @@
 $ git clone https://github.com/XiaoGaoYang/auto-blog.git
 $ cd auto-blog
 $ npm install
-$ npm link
+$ sudo npm link
 ```
 
 ## Usage
+
+```
+Usage: auto-blog [--note <path>]  
+选项：  
+  --note, -n    要发布到博客上的笔记路径  [必需]  
+  --blog, -b    博客在本地的存储路径
+  --deploy, -d  部署hexo博客           [布尔]  
+  --help, -h    显示帮助信息            [布尔]  
+```
 
 使用前在文章首部添加如下内容
 ```
@@ -29,7 +38,6 @@ categories: <文章分类>
 在命令行里执行下面命令
 
 ```bash
-# -n 参数为要发布的文章的本地路径
 $ auto-blog -n "G:\test.md"
 ```
 
@@ -39,7 +47,6 @@ $ auto-blog -n "G:\test.md"
 
 ## TODO
 
-+ [ ] 兼容Linux系统
 + [ ] 发布CSDN博客
 + [ ] 发布工作室wiki
 + [ ] 已发布文章修改

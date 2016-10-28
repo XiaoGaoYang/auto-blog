@@ -2,6 +2,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const spawn = require('child_process').execFile;
 const exec = require('child_process').exec;
 const iconv = require('iconv-lite');
@@ -10,24 +11,34 @@ const imagemin = require('imagemin');
 const imageminMozjpeg = require('imagemin-mozjpeg');
 const imageminPngquant = require('imagemin-pngquant');
 
+const platform = os.platform();
+
+const config = require('./config');
+
 const argv = require('yargs')
-  .option('n', {
-    alias: 'note',
+  .option('note', {
+    alias: 'n',
     describe: '要发布到博客上的笔记路径',
     demand: true
   })
-  .option('b', {
-    alias: 'blog',
+  .option('blog', {
+    alias: 'b',
     describe: '博客在本地的存储路径'
+  })
+  .option('deploy', {
+    alias: 'd',
+    describe: '部署hexo博客',
+    type: 'boolean'
   })
   .usage('Usage: auto-blog [--note <path>]')
   .help('h', '显示帮助信息')
-  .alias('h', 'help')
+  .alias('help', 'h')
   .argv;
 
 
 // 默认路径
-const blog = 'E:\\Git\\my-blog\\';
+const blog = config.blogPath;
+
 const note = '';
 
 fs.readFile(path.join(note, argv.n), 'utf-8', (err, data) => {
@@ -42,7 +53,7 @@ const newPost = (data) => {
 
   const info = handleYaml(yaml);
   const { basePath,fileName } = handleName(argv.n);
-  const newYaml = '---\r\ntitle: '+ fileName +'\r\ntags: '+ info.tags +'\r\ncategories: '+ info.categories +'\r\ndata: '+ new Date() +'\r\n---';
+  const newYaml = '---\ntitle: '+ fileName +'\ntags: '+ info.tags +'\ncategories: '+ info.categories +'\ndata: '+ new Date() +'\n---';
 
   // 新建一个博文，第一次发布文章才使用
   runCommand('hexo new post '+info.title,(txt)=>{
@@ -52,56 +63,78 @@ const newPost = (data) => {
     const newData = newYaml + newContent;
     
     // 写文件，不存在则会被创建，存在则会被覆盖
-    fs.open(path.join(path.join(blog, 'source\\_posts\\', info.title + '.md')), 'w', (err, fd) => {
+    fs.open(path.join(path.join(blog, 'source/_posts/', info.title + '.md')), 'w', (err, fd) => {
       if (err) throw err;
       fs.write(fd, newData, (err, wirte, string) => {
         if (err) throw err;
-        console.log(info.title+'.md写入完成');
+        console.log(info.title+'.md写入完成\n');
       });
     });
 
     // 压缩图片
-    imageCompress(basePath, aImgSrc, path.join(blog, 'source\\_posts\\', info.title), () => {
-      console.log('图片压缩完成');
-      // 执行hexo clean命令
-      runCommand('hexo clean',(txt)=>{
-        console.log(txt);
-        console.log('正在部署中...请等待...');
-        runCommand('hexo d -g',(txt)=>{
-          console.log(txt);
-        });
+    if(aImgSrc.length){
+      imageCompress(basePath, aImgSrc, path.join(blog, 'source/_posts/', info.title), () => {
+        console.log('图片压缩完成');
+        preview();
       });
-    });
+    }else{
+      preview();
+    }
 
   });
-  
+
+}
+
+// 预览
+const preview = () => {
+  // 执行hexo clean命令
+  runCommand('hexo clean', (txt) => {
+    console.log(txt);
+    if(argv.d){
+      console.log('正在部署中...请等待...');
+      runCommand('hexo d -g', (txt) => {
+        console.log(txt);
+      });
+    }else{
+      runCommand('hexo s -g', (txt) => {
+        console.log(txt);
+      });
+    }
+  });
 }
 
 // 运行命令，解决window下控制台乱码问题
 const runCommand = (command,callback) => {
-  exec(command,{encoding:'hex',cwd:path.join(blog)},(err,stdout,stderr)=>{
-    let stdoutArr = [];
-    stdout.each(2,function(data){
-      stdoutArr.push(parseInt(data,16));
-    });
-
-    /*
-    let stderrArr = [];
-    stderr.each(2,function(data){
-      stderrArr.push(parseInt(data,16));
-    });
-    */
-    // console.log(iconv.decode(new Buffer(stdoutArr),'gbk'));
-    // console.log('err: ',iconv.decode(new Buffer(stderrArr),'gbk'));
-
+  let options = {
+    cwd:path.join(blog),
+    encoding: platform === 'linux' ? 'utf-8' : 'hex',
+  };
+  /*
+  exec(command,options,(err,stdout,stderr)=>{
     if (err) throw err;
-    callback(iconv.decode(new Buffer(stdoutArr),'gbk'));
+    if(platform === 'linux'){
+      callback(stdout);
+    }else{
+      let stdoutArr = [];
+      stdout.each(2,function(data){
+        stdoutArr.push(parseInt(data,16));
+      });
+      callback(iconv.decode(new Buffer(stdoutArr),'gbk'));
+    }
+  });
+  */
+  const child = exec(command,options);
+  child.stdout.on('data',(data)=>{
+    callback(data);
+  });
+  child.stderr.on('data',(data)=>{
+    callback(data);
   });
 }
 
 // 接受yaml字符串返回对应的json对象
 const handleYaml = (str) => {
-  str = str.split('\r\n');  // 根据换行符来切割字符串
+  str = str.split('\n');  // 根据换行符来切割字符串
   let yamlJson = {};
   for(let i=0;i<str.length;i++){
     let arr = str[i].split(':');
@@ -116,11 +149,14 @@ const handleContent = (content) => {
   let reg = /\!\[.*?\]\(.+?\.(jpg|png)\)/ig;
   let aImgContent = content.match(reg);
   let aImgSrc = [];
-  for(let i=0;i<aImgContent.length;i++){
-    let imgSrc = aImgContent[i].substring(aImgContent[i].lastIndexOf('(')+1,aImgContent[i].length-1);
-    aImgSrc.push(imgSrc);
-    let imgTitle = aImgContent[i].substring(2,aImgContent[i].lastIndexOf(']'));
-    aImgContent[i] = '{% asset_img '+ imgSrc.substring(imgSrc.lastIndexOf('/')+1) +' '+ imgTitle +' %}';
+  // 替换图片格式
+  if(aImgContent && aImgContent.length){
+    for(let i=0;i<aImgContent.length;i++){
+      let imgSrc = aImgContent[i].substring(aImgContent[i].lastIndexOf('(')+1,aImgContent[i].length-1);
+      aImgSrc.push(imgSrc);
+      let imgTitle = aImgContent[i].substring(2,aImgContent[i].lastIndexOf(']'));
+      aImgContent[i] = '{% asset_img '+ imgSrc.substring(imgSrc.lastIndexOf('/')+1) +' '+ imgTitle +' %}';
+    }
   }
   // 不知道为什么用match匹配时正好，用split匹配切割时却切出来含有图片后缀的数组项
   let aText = content.split(reg);
@@ -143,8 +179,9 @@ const handleContent = (content) => {
 
 // 处理文章名字，输入文件路径，返回路径和文件名
 const handleName = (name) => {
-  let basePath = name.substring(0,name.lastIndexOf('\\'));
-  let fileName = name.substring(name.lastIndexOf('\\')+1, name.lastIndexOf('.'))
+  const char = platform === 'linux' ? '/' : '\\';
+  const basePath = name.substring(0,name.lastIndexOf(char));
+  const fileName = name.substring(name.lastIndexOf(char)+1, name.lastIndexOf('.'))
   return {basePath,fileName};
 }
 
